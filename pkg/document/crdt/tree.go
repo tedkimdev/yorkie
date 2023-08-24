@@ -49,8 +49,8 @@ type TreeNode struct {
 	ID        *TreeNodeID
 	RemovedAt *time.Ticket
 
-	InsPrev *TreeNode
-	InsNext *TreeNode
+	InsPrevID *TreeNodeID
+	InsNextID *TreeNodeID
 
 	// Value is optional. If the value is not empty, it means that the node is a
 	// text node.
@@ -402,8 +402,18 @@ func (t *Tree) purgeNode(node *TreeNode) error {
 	}
 	t.NodeMapByID.Remove(node.ID)
 
-	// TODO(hackerwins): Reconnect the insertion linked list.
-	node.InsPrev = nil
+	insPrevID := node.InsPrevID
+	insNextID := node.InsNextID
+	if insPrevID != nil {
+		insPrev := t.findFloorNode(insPrevID)
+		insPrev.InsNextID = insNextID
+	}
+	if insNextID != nil {
+		insNext := t.findFloorNode(insNextID)
+		insNext.InsPrevID = insPrevID
+	}
+	node.InsPrevID = nil
+	node.InsNextID = nil
 
 	delete(t.removedNodeMap, node.ID.toIDString())
 	return nil
@@ -529,26 +539,10 @@ func (t *Tree) FindPos(offset int) (*TreePos, error) {
 	var leftSibling *TreeNode
 
 	if node.IsText() {
-		if node.Parent.Children(true)[0] == node && offset == 0 {
+		if node.Parent.Children(false)[0] == node && offset == 0 {
 			leftSibling = node.Parent.Value
 		} else {
 			leftSibling = node.Value
-			absOffset := node.Value.ID.Offset
-			split, err := node.Value.Split(offset, absOffset)
-			if err != nil {
-				return nil, err
-			}
-
-			if split != nil {
-				split.InsPrev = node.Value
-				t.NodeMapByID.Put(split.ID, split)
-
-				if node.Value.InsNext != nil {
-					node.Value.InsNext.InsPrev = split
-					split.InsNext = node.Value.InsNext
-				}
-				node.Value.InsNext = split
-			}
 		}
 		node = node.Parent
 	} else {
@@ -632,7 +626,7 @@ func (t *Tree) Edit(from, to *TreePos,
 				index.TraverseNode(node.IndexTreeNode, func(node *index.Node[*TreeNode], depth int) {
 					if node.Value.remove(editedAt, time.MaxTicket) {
 						// TODO(sejongk): Refactor the repeated code.
-						latestCreatedAt = latestCreatedAtMapByActor[actorIDHex]
+						latestCreatedAt = createdAtMapByActor[actorIDHex]
 						createdAt := node.Value.ID.CreatedAt
 						if latestCreatedAt == nil || createdAt.After(latestCreatedAt) {
 							createdAtMapByActor[actorIDHex] = createdAt
@@ -672,7 +666,7 @@ func (t *Tree) Edit(from, to *TreePos,
 				if fromParent.Value.IsRemoved() {
 					actorIDHex := node.Value.ID.CreatedAt.ActorIDHex()
 					if node.Value.remove(editedAt, time.MaxTicket) {
-						latestCreatedAt := latestCreatedAtMapByActor[actorIDHex]
+						latestCreatedAt := createdAtMapByActor[actorIDHex]
 						createdAt := node.Value.ID.CreatedAt
 						if latestCreatedAt == nil || createdAt.After(latestCreatedAt) {
 							createdAtMapByActor[actorIDHex] = createdAt
@@ -776,14 +770,15 @@ func (t *Tree) findTreeNodesWithSplitText(pos *TreePos, editedAt *time.Ticket) (
 		}
 
 		if split != nil {
-			split.InsPrev = leftSiblingNode
+			split.InsPrevID = leftSiblingNode.ID
 			t.NodeMapByID.Put(split.ID, split)
 
-			if leftSiblingNode.InsNext != nil {
-				leftSiblingNode.InsNext.InsPrev = split
-				split.InsNext = leftSiblingNode.InsNext
+			if leftSiblingNode.InsNextID != nil {
+				insNext := t.findFloorNode(leftSiblingNode.InsNextID)
+				insNext.InsPrevID = split.ID
+				split.InsNextID = leftSiblingNode.InsNextID
 			}
-			leftSiblingNode.InsNext = split
+			leftSiblingNode.InsNextID = split.ID
 		}
 	}
 
@@ -805,52 +800,79 @@ func (t *Tree) findTreeNodesWithSplitText(pos *TreePos, editedAt *time.Ticket) (
 }
 
 // toTreePos converts the given crdt.TreePos to local index.TreePos<CRDTTreeNode>.
-func (t *Tree) toTreePos(pos *TreePos) *index.TreePos[*TreeNode] {
+func (t *Tree) toTreePos(pos *TreePos) (*index.TreePos[*TreeNode], error) {
 	if pos.ParentID == nil || pos.LeftSiblingID == nil {
-		return nil
+		return nil, nil
 	}
 
 	parentNode, leftSiblingNode := t.toTreeNodes(pos)
 	if parentNode == nil || leftSiblingNode == nil {
-		return nil
+		return nil, nil
 	}
 
 	var treePos *index.TreePos[*TreeNode]
 
-	if parentNode == leftSiblingNode {
-		treePos = &index.TreePos[*TreeNode]{
-			Node:   leftSiblingNode.IndexTreeNode,
-			Offset: 0,
-		}
-	} else {
-		leftSiblingOffset, err := parentNode.IndexTreeNode.FindOffset(leftSiblingNode.IndexTreeNode)
-		if err != nil {
-			return nil
+	if parentNode.IsRemoved() {
+		// If parentNode is removed, treePos is the position of its least alive ancestor.
+		var childNode *TreeNode
+		for parentNode.IsRemoved() {
+			childNode = parentNode
+			parentNode = childNode.IndexTreeNode.Parent.Value
 		}
 
-		offset := leftSiblingOffset + 1
-		if leftSiblingNode.IsText() {
-			offset, err = t.IndexTree.LeftSiblingsSize(parentNode.IndexTreeNode, offset)
-			if err != nil {
-				return nil // NOTE(sejongk): should return error instead?
-			}
+		childOffset, err := parentNode.IndexTreeNode.FindOffset(childNode.IndexTreeNode)
+		if err != nil {
+			return nil, nil
 		}
 
 		treePos = &index.TreePos[*TreeNode]{
 			Node:   parentNode.IndexTreeNode,
-			Offset: offset,
+			Offset: childOffset,
 		}
+	} else {
+		if parentNode == leftSiblingNode {
+			treePos = &index.TreePos[*TreeNode]{
+				Node:   leftSiblingNode.IndexTreeNode,
+				Offset: 0,
+			}
+		} else {
+			// Find the closest existing leftSibling node.
+			offset, err := parentNode.IndexTreeNode.FindOffset(leftSiblingNode.IndexTreeNode)
+			if err != nil {
+				return nil, nil
+			}
 
+			if !leftSiblingNode.IsRemoved() {
+				if leftSiblingNode.IsText() {
+					treePos = &index.TreePos[*TreeNode]{
+						Node:   leftSiblingNode.IndexTreeNode,
+						Offset: leftSiblingNode.IndexTreeNode.PaddedLength(),
+					}
+					return treePos, nil
+				}
+				offset++
+			}
+
+			treePos = &index.TreePos[*TreeNode]{
+				Node:   parentNode.IndexTreeNode,
+				Offset: offset,
+			}
+
+		}
 	}
 
-	return treePos
+	return treePos, nil
 }
 
-// toIndex converts the given CRDTTreePos to the index of the tree.
-func (t *Tree) toIndex(pos *TreePos) (int, error) {
-	treePos := t.toTreePos(pos)
+// ToIndex converts the given CRDTTreePos to the index of the tree.
+func (t *Tree) ToIndex(pos *TreePos) (int, error) {
+	treePos, err := t.toTreePos(pos)
 	if treePos == nil {
 		return -1, nil
+	}
+
+	if err != nil {
+		return 0, err
 	}
 
 	idx, err := t.IndexTree.IndexOf(treePos)
@@ -861,21 +883,29 @@ func (t *Tree) toIndex(pos *TreePos) (int, error) {
 	return idx, nil
 }
 
-func (t *Tree) toTreeNodes(pos *TreePos) (*TreeNode, *TreeNode) {
-	parentKey, parentNode := t.NodeMapByID.Floor(pos.ParentID)
-	leftSiblingKey, leftSiblingNode := t.NodeMapByID.Floor(pos.LeftSiblingID)
+// findFloorNode returns node from given id.
+func (t *Tree) findFloorNode(id *TreeNodeID) *TreeNode {
+	key, node := t.NodeMapByID.Floor(id)
 
-	if parentNode == nil ||
-		leftSiblingNode == nil ||
-		parentKey.CreatedAt.Compare(pos.ParentID.CreatedAt) != 0 ||
-		leftSiblingKey.CreatedAt.Compare(pos.LeftSiblingID.CreatedAt) != 0 {
+	if node == nil || key.CreatedAt.Compare(id.CreatedAt) != 0 {
+		return nil
+	}
+
+	return node
+}
+
+func (t *Tree) toTreeNodes(pos *TreePos) (*TreeNode, *TreeNode) {
+	parentNode := t.findFloorNode(pos.ParentID)
+	leftSiblingNode := t.findFloorNode(pos.LeftSiblingID)
+
+	if parentNode == nil || leftSiblingNode == nil {
 		return nil, nil
 	}
 
 	if pos.LeftSiblingID.Offset > 0 &&
 		pos.LeftSiblingID.Offset == leftSiblingNode.ID.Offset &&
-		leftSiblingNode.InsPrev != nil {
-		return parentNode, leftSiblingNode.InsPrev
+		leftSiblingNode.InsPrevID != nil {
+		return parentNode, t.findFloorNode(leftSiblingNode.InsPrevID)
 	}
 
 	return parentNode, leftSiblingNode

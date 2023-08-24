@@ -204,12 +204,12 @@ func FromDocumentID(pbID string) (types.ID, error) {
 // FromEventType converts the given Protobuf formats to model format.
 func FromEventType(pbDocEventType api.DocEventType) (types.DocEventType, error) {
 	switch pbDocEventType {
-	case api.DocEventType_DOC_EVENT_TYPE_DOCUMENTS_CHANGED:
-		return types.DocumentsChangedEvent, nil
-	case api.DocEventType_DOC_EVENT_TYPE_DOCUMENTS_WATCHED:
-		return types.DocumentsWatchedEvent, nil
-	case api.DocEventType_DOC_EVENT_TYPE_DOCUMENTS_UNWATCHED:
-		return types.DocumentsUnwatchedEvent, nil
+	case api.DocEventType_DOC_EVENT_TYPE_DOCUMENT_CHANGED:
+		return types.DocumentChangedEvent, nil
+	case api.DocEventType_DOC_EVENT_TYPE_DOCUMENT_WATCHED:
+		return types.DocumentWatchedEvent, nil
+	case api.DocEventType_DOC_EVENT_TYPE_DOCUMENT_UNWATCHED:
+		return types.DocumentUnwatchedEvent, nil
 	}
 	return "", fmt.Errorf("%v: %w", pbDocEventType, ErrUnsupportedEventType)
 }
@@ -642,12 +642,33 @@ func fromTreeNode(pbNode *api.TreeNode) (*crdt.TreeNode, error) {
 		attrs.Set(k, pbAttr.Value, updatedAt)
 	}
 
-	return crdt.NewTreeNode(
+	node := crdt.NewTreeNode(
 		id,
 		pbNode.Type,
 		attrs,
 		pbNode.Value,
-	), nil
+	)
+
+	if pbNode.GetInsPrevId() != nil {
+		node.InsPrevID, err = fromTreeNodeID(pbNode.GetInsPrevId())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if pbNode.GetInsNextId() != nil {
+		node.InsNextID, err = fromTreeNodeID(pbNode.GetInsNextId())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	node.RemovedAt, err = fromTimeTicket(pbNode.RemovedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return node, nil
 }
 
 func fromTreePos(pbPos *api.TreePos) (*crdt.TreePos, error) {

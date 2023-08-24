@@ -243,8 +243,9 @@ message TreeNode {
   string value = 3;
   TimeTicket removed_at = 4;
   TreeNodeID ins_prev_id = 5;
-  int32 depth = 6;
-  map<string, NodeAttr> attributes = 7;
+  TreeNodeID ins_next_id = 6;
+  int32 depth = 7;
+  map<string, NodeAttr> attributes = 8;
 }
 
 message TreeNodes {
@@ -353,12 +354,12 @@ enum ValueType {
 }
 
 enum DocEventType {
-  DOC_EVENT_TYPE_DOCUMENTS_CHANGED = 0;
-  DOC_EVENT_TYPE_DOCUMENTS_WATCHED = 1;
-  DOC_EVENT_TYPE_DOCUMENTS_UNWATCHED = 2;
+  DOC_EVENT_TYPE_DOCUMENT_CHANGED = 0;
+  DOC_EVENT_TYPE_DOCUMENT_WATCHED = 1;
+  DOC_EVENT_TYPE_DOCUMENT_UNWATCHED = 2;
 }
 
 message DocEvent {
   DocEventType type = 1;
-  bytes publisher = 2;
+  string publisher = 2;
 }
