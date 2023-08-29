@@ -15,4 +15,13 @@ const (
 	// DocumentUnwatchedEvent is an event that occurs when document is
 	// unwatched by other clients.
 	DocumentUnwatchedEvent DocEventType = "document-unwatched"
+
+	ServerReconnectEvent DocEventType = "server-reconnect"
+)
+
+type ServerEventType string
+
+const (
+	ServerUpEvent   ServerEventType = "server-up"
+	ServerDownEvent ServerEventType = "server-down"
 )

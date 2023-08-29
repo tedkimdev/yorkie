@@ -335,6 +335,12 @@ func (s *yorkieServer) WatchDocument(
 	req *api.WatchDocumentRequest,
 	stream api.YorkieService_WatchDocumentServer,
 ) error {
+	isSplitBrain, err := s.backend.IsSplitBrainInCluster(stream.Context())
+	if err != nil {
+		logging.From(stream.Context()).Error(err)
+		return err
+	}
+
 	clientID, err := time.ActorIDFromHex(req.ClientId)
 	if err != nil {
 		return err
@@ -403,6 +409,13 @@ func (s *yorkieServer) WatchDocument(
 		},
 	}); err != nil {
 		return err
+	}
+
+	if isSplitBrain {
+		if err := s.backend.ServerEventBus.StoreSubscription(stream.Context(), subscription); err != nil {
+			logging.From(stream.Context()).Error(err)
+			return err
+		}
 	}
 
 	for {

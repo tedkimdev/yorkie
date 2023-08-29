@@ -27,6 +27,7 @@ import (
 
 	"github.com/yorkie-team/yorkie/server"
 	"github.com/yorkie-team/yorkie/server/backend/database/mongo"
+	"github.com/yorkie-team/yorkie/server/backend/sync/etcd"
 	"github.com/yorkie-team/yorkie/server/logging"
 )
 
@@ -51,6 +52,12 @@ var (
 	authWebhookCacheAuthTTL    time.Duration
 	authWebhookCacheUnauthTTL  time.Duration
 	projectInfoCacheTTL        time.Duration
+
+	etcdEndpoints     []string
+	etcdDialTimeout   time.Duration
+	etcdUsername      string
+	etcdPassword      string
+	etcdLockLeaseTime time.Duration
 
 	conf = server.NewConfig()
 )
@@ -77,6 +84,16 @@ func newServerCmd() *cobra.Command {
 					ConnectionTimeout: mongoConnectionTimeout.String(),
 					YorkieDatabase:    mongoYorkieDatabase,
 					PingTimeout:       mongoPingTimeout.String(),
+				}
+			}
+
+			if etcdEndpoints != nil {
+				conf.ETCD = &etcd.Config{
+					Endpoints:     etcdEndpoints,
+					DialTimeout:   etcdDialTimeout.String(),
+					Username:      etcdUsername,
+					Password:      etcdPassword,
+					LockLeaseTime: etcdLockLeaseTime.String(),
 				}
 			}
 
@@ -112,6 +129,7 @@ func newServerCmd() *cobra.Command {
 }
 
 func handleSignal(r *server.Yorkie) int {
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
@@ -252,6 +270,36 @@ func init() {
 		"mongo-ping-timeout",
 		server.DefaultMongoPingTimeout,
 		"Mongo DB's ping timeout",
+	)
+	cmd.Flags().StringSliceVar(
+		&etcdEndpoints,
+		"etcd-endpoints",
+		nil,
+		"Comma separated list of etcd endpoints",
+	)
+	cmd.Flags().DurationVar(
+		&etcdDialTimeout,
+		"etcd-dial-timeout",
+		etcd.DefaultDialTimeout,
+		"ETCD's dial timeout",
+	)
+	cmd.Flags().StringVar(
+		&etcdUsername,
+		"etcd-username",
+		"",
+		"ETCD's user name",
+	)
+	cmd.Flags().StringVar(
+		&etcdPassword,
+		"etcd-password",
+		"",
+		"ETCD's password",
+	)
+	cmd.Flags().DurationVar(
+		&etcdLockLeaseTime,
+		"etcd-lock-lease-time",
+		etcd.DefaultLockLeaseTime,
+		"ETCD's lease time for lock",
 	)
 	cmd.Flags().StringVar(
 		&conf.Backend.AdminUser,

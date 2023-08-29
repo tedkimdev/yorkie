@@ -27,6 +27,7 @@ import (
 	"github.com/yorkie-team/yorkie/server/backend"
 	"github.com/yorkie-team/yorkie/server/backend/database/mongo"
 	"github.com/yorkie-team/yorkie/server/backend/housekeeping"
+	"github.com/yorkie-team/yorkie/server/backend/sync/etcd"
 	"github.com/yorkie-team/yorkie/server/profiling"
 	"github.com/yorkie-team/yorkie/server/rpc"
 )
@@ -77,6 +78,7 @@ type Config struct {
 	Housekeeping *housekeeping.Config `yaml:"Housekeeping"`
 	Backend      *backend.Config      `yaml:"Backend"`
 	Mongo        *mongo.Config        `yaml:"Mongo"`
+	ETCD         *etcd.Config         `yaml:"ETCD"`
 }
 
 // NewConfig returns a Config struct that contains reasonable defaults
@@ -128,6 +130,10 @@ func (c *Config) Validate() error {
 		if err := c.Mongo.Validate(); err != nil {
 			return err
 		}
+	}
+
+	if c.ETCD != nil {
+		return c.ETCD.Validate()
 	}
 
 	return nil
@@ -227,6 +233,15 @@ func (c *Config) ensureDefaultValue() {
 
 		if c.Mongo.PingTimeout == "" {
 			c.Mongo.PingTimeout = DefaultMongoPingTimeout.String()
+		}
+	}
+	if c.ETCD != nil {
+		if c.ETCD.DialTimeout == "" {
+			c.ETCD.DialTimeout = etcd.DefaultDialTimeout.String()
+		}
+
+		if c.ETCD.LockLeaseTime == "" {
+			c.ETCD.LockLeaseTime = etcd.DefaultLockLeaseTime.String()
 		}
 	}
 }

@@ -23,6 +23,7 @@ import (
 	gosync "sync"
 
 	"github.com/yorkie-team/yorkie/server/backend"
+	"github.com/yorkie-team/yorkie/server/logging"
 	"github.com/yorkie-team/yorkie/server/profiling"
 	"github.com/yorkie-team/yorkie/server/profiling/prometheus"
 	"github.com/yorkie-team/yorkie/server/rpc"
@@ -57,6 +58,7 @@ func New(conf *Config) (*Yorkie, error) {
 	be, err := backend.New(
 		conf.Backend,
 		conf.Mongo,
+		conf.ETCD,
 		conf.Housekeeping,
 		metrics,
 	)
@@ -94,11 +96,20 @@ func (r *Yorkie) Start() error {
 			return err
 		}
 	}
+
+	if err := r.backend.PublishServerUpEvent(); err != nil {
+		logging.DefaultLogger().Error(err)
+	}
+
 	return r.rpcServer.Start()
 }
 
 // Shutdown shuts down this Yorkie server.
 func (r *Yorkie) Shutdown(graceful bool) error {
+	if err := r.backend.PublishServerDownEvent(); err != nil {
+		logging.DefaultLogger().Error(err)
+	}
+
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	if r.shutdown {

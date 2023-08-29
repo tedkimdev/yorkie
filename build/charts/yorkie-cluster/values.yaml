@@ -8,13 +8,15 @@ yorkie:
     replicaCount: 3
 
   image:
-    repository: yorkieteam/yorkie
-    pullPolicy: IfNotPresent
-    tag: ""
+    repository: ktd317/yorkie
+    pullPolicy: Always
+    tag: "test"
 
   args:
     dbUrl: &mongoUrl mongodb
     dbPort: &mongoPort 27017
+    etcdUrl: etcd-client
+    etcdPort: 2379
 
   ports:
     rpcPort: 11101
@@ -47,10 +49,6 @@ ingressGateway:
     ringHash:
       enabled: false
       minimumRingSize: 1024
-
-  # Connection idle timeout for WatchDocument API
-  httpConnection:
-    streamIdleTimeout: 60s
 
   resources: {}
 

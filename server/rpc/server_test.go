@@ -39,6 +39,7 @@ import (
 	"github.com/yorkie-team/yorkie/server/backend/database"
 	"github.com/yorkie-team/yorkie/server/backend/database/mongo"
 	"github.com/yorkie-team/yorkie/server/backend/housekeeping"
+	"github.com/yorkie-team/yorkie/server/backend/sync/etcd"
 	"github.com/yorkie-team/yorkie/server/profiling/prometheus"
 	"github.com/yorkie-team/yorkie/server/rpc"
 	"github.com/yorkie-team/yorkie/test/helper"
@@ -84,11 +85,17 @@ func TestMain(m *testing.M) {
 		YorkieDatabase:    helper.TestDBName(),
 		ConnectionTimeout: helper.MongoConnectionTimeout,
 		PingTimeout:       helper.MongoPingTimeout,
-	}, &housekeeping.Config{
-		Interval:                  helper.HousekeepingInterval.String(),
-		CandidatesLimitPerProject: helper.HousekeepingCandidatesLimitPerProject,
-		ProjectFetchSize:          helper.HousekeepingProjectFetchSize,
-	}, met)
+	}, &etcd.Config{
+		Endpoints:     helper.ETCDEndpoints,
+		DialTimeout:   helper.ETCDDialTimeout.String(),
+		LockLeaseTime: helper.ETCDLockLeaseTime.String(),
+	},
+		&housekeeping.Config{
+			Interval:                  helper.HousekeepingInterval.String(),
+			CandidatesLimitPerProject: helper.HousekeepingCandidatesLimitPerProject,
+			ProjectFetchSize:          helper.HousekeepingProjectFetchSize,
+		},
+		met)
 	if err != nil {
 		log.Fatal(err)
 	}

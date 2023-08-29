@@ -23,7 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
+	gotime "time"
 
 	"github.com/rs/xid"
 
@@ -35,6 +35,7 @@ import (
 	"github.com/yorkie-team/yorkie/server/backend/database/mongo"
 	"github.com/yorkie-team/yorkie/server/backend/housekeeping"
 	"github.com/yorkie-team/yorkie/server/backend/sync"
+	"github.com/yorkie-team/yorkie/server/backend/sync/etcd"
 	memsync "github.com/yorkie-team/yorkie/server/backend/sync/memory"
 	"github.com/yorkie-team/yorkie/server/logging"
 	"github.com/yorkie-team/yorkie/server/profiling/prometheus"
@@ -46,11 +47,12 @@ type Backend struct {
 	Config     *Config
 	serverInfo *sync.ServerInfo
 
-	DB           database.Database
-	Coordinator  sync.Coordinator
-	Metrics      *prometheus.Metrics
-	Background   *background.Background
-	Housekeeping *housekeeping.Housekeeping
+	DB             database.Database
+	Coordinator    sync.Coordinator
+	ServerEventBus sync.ServerEventBus
+	Metrics        *prometheus.Metrics
+	Background     *background.Background
+	Housekeeping   *housekeeping.Housekeeping
 
 	AuthWebhookCache *cache.LRUExpireCache[string, *types.AuthWebhookResponse]
 }
@@ -59,6 +61,7 @@ type Backend struct {
 func New(
 	conf *Config,
 	mongoConf *mongo.Config,
+	etcdConf *etcd.Config,
 	housekeepingConf *housekeeping.Config,
 	metrics *prometheus.Metrics,
 ) (*Backend, error) {
@@ -74,7 +77,7 @@ func New(
 	serverInfo := &sync.ServerInfo{
 		ID:        xid.New().String(),
 		Hostname:  hostname,
-		UpdatedAt: time.Now(),
+		UpdatedAt: gotime.Now(),
 	}
 
 	bg := background.New()
@@ -91,6 +94,18 @@ func New(
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	var serverEventBus sync.ServerEventBus
+	if etcdConf != nil {
+		etcdClient, err := etcd.Dial(etcdConf, serverInfo)
+		if err != nil {
+			return nil, err
+		}
+		if err := etcdClient.Initialize(); err != nil {
+			return nil, err
+		}
+		serverEventBus = etcdClient
 	}
 
 	// TODO(hackerwins): Implement the coordinator for a shard. For now, we
@@ -137,11 +152,12 @@ func New(
 		Config:     conf,
 		serverInfo: serverInfo,
 
-		Background:   bg,
-		Metrics:      metrics,
-		DB:           db,
-		Coordinator:  coordinator,
-		Housekeeping: keeping,
+		Background:     bg,
+		Metrics:        metrics,
+		DB:             db,
+		Coordinator:    coordinator,
+		ServerEventBus: serverEventBus,
+		Housekeeping:   keeping,
 
 		AuthWebhookCache: authWebhookCache,
 	}, nil
@@ -163,6 +179,10 @@ func (b *Backend) Shutdown() error {
 		logging.DefaultLogger().Error(err)
 	}
 
+	if err := b.ServerEventBus.Close(); err != nil {
+		logging.DefaultLogger().Error(err)
+	}
+
 	logging.DefaultLogger().Infof("backend stopped: id: %s", b.serverInfo.ID)
 	return nil
 }
@@ -170,4 +190,59 @@ func (b *Backend) Shutdown() error {
 // Members returns the members of this cluster.
 func (b *Backend) Members() map[string]*sync.ServerInfo {
 	return b.Coordinator.Members()
+}
+
+func (b *Backend) PublishServerUpEvent() error {
+	if b.ServerEventBus == nil {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	b.ServerEventBus.Publish(
+		ctx,
+		types.ID(b.serverInfo.ID),
+		sync.ServerEvent{
+			Type:        types.ServerUpEvent,
+			Publisher:   types.ID(b.serverInfo.ID),
+			EventID:     types.ID(xid.New().String()),
+			PublishedAt: gotime.Now(),
+		},
+	)
+
+	return nil
+}
+
+func (b *Backend) PublishServerDownEvent() error {
+	if b.ServerEventBus == nil {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	b.ServerEventBus.Publish(
+		ctx,
+		types.ID(b.serverInfo.ID),
+		sync.ServerEvent{
+			Type:        types.ServerDownEvent,
+			Publisher:   types.ID(b.serverInfo.ID),
+			EventID:     types.ID(xid.New().String()),
+			PublishedAt: gotime.Now(),
+		},
+	)
+
+	return nil
+}
+
+func (b *Backend) IsSplitBrainInCluster(ctx context.Context) (bool, error) {
+	if b.ServerEventBus == nil {
+		return false, nil
+	}
+
+	isSplitBrain, err := b.ServerEventBus.IsSplitBrainInCluster(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	return isSplitBrain, nil
 }
